@@ -492,9 +492,35 @@ python test_all.py
 
 已提供完整策略技術文件：
 
-- `docs/STRATEGY_PLAYBOOK.md`
+- `docs/STRATEGY_PLAYBOOK.md` — 策略技術文件（資料來源、訊號設計、偏誤控制、風控）
+- [`reports/trade_analysis_report.md`](reports/trade_analysis_report.md) — **交易級策略分析報告（無複利）**
 
-內容包含：資料來源、訊號與權重設計、偏誤控制、回測流程、風控、20 年驗證標準、實盤落地前檢查清單。
+### 14.1 Trade-Level Analysis（無複利分析）
+
+獨立於傳統回測的 per-trade 分析工具，以固定資本 $30,000 評估每筆交易品質：
+
+```bash
+python scripts/trade_analysis.py --years 20
+```
+
+分析指標包含：
+- **Mathematical Expectancy**：每筆交易期望獲利
+- **IC / ICIR**：動量因子預測力與穩定性
+- **Entry / Exit / Total Efficiency**：進出場時機品質
+- **MFE / MAE**：持有期間最大浮盈/浮虧
+
+20 年結果摘要（4/6 通過）：
+
+| 指標 | 結果 | 判定 |
+|------|------|------|
+| Expectancy | $83.64/trade | PASS |
+| Profit Factor | 1.79 | PASS |
+| Win Rate | 56.7% | PASS |
+| IC | 0.0605 | PASS |
+| ICIR | 0.1509 | FAIL |
+| Total Efficiency | 13.5% | FAIL |
+
+詳細分析見 [完整報告](reports/trade_analysis_report.md)。
 
 ---
 
