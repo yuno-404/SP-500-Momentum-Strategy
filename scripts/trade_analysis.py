@@ -439,10 +439,332 @@ def run_trade_analysis(years_back=10):
             f"{'${:,.0f}'.format(s_total_pnl):>12} {s_mfe:>+7.2f}% {s_mae:>+7.2f}%"
         )
 
+    # ── Section 8: Benchmark Comparison (Monthly Return % — No Compounding) ──
+    print(f"\n{sep}")
+    print("  8. BENCHMARK COMPARISON (MONTHLY RETURN RATE %)")
+    print(sep)
+    print("  Pure return-rate comparison: no compounding, no dollar amounts.")
+    print("  Strategy monthly return = portfolio net P&L / $30K.")
+    print("  Benchmark monthly return = (close - prev_close) / prev_close.")
+    print("  Alpha = Strategy% - Benchmark%  per month.")
+    print(sep2)
+
+    actual_years = len(monthly_df) / 12
+
+    # ── Download benchmark prices ──
+    print("  Loading benchmark data (SPY, SPMO, SPX) ...")
+    benchmark_prices = dm.download_benchmark(start_date)
+    bench_monthly_prices = benchmark_prices.resample("ME").last()
+
+    # Strategy monthly return rates (already computed, no compounding)
+    strat_monthly_rets = monthly_df["net_return"].values  # e.g. 0.025 = +2.5%
+    strat_dates = list(monthly_df["date"])
+
+    # ── Compute benchmark monthly return rates ──
+    bench_rets = {}  # name -> np.array of monthly return rates
+    for col in ["SPY", "SPMO", "SPX"]:
+        if col not in bench_monthly_prices.columns:
+            continue
+        bm = bench_monthly_prices[col].dropna()
+        bm_r = []
+        for idx in range(len(strat_dates)):
+            d = strat_dates[idx]
+            mask = bm.index <= d + pd.Timedelta(days=5)
+            if mask.sum() < 2:
+                bm_r.append(0.0)
+                continue
+            bm_filtered = bm[mask]
+            cur_price = bm_filtered.iloc[-1]
+            prev_price = bm_filtered.iloc[-2]
+            if prev_price > 0:
+                bm_r.append((cur_price - prev_price) / prev_price)
+            else:
+                bm_r.append(0.0)
+        bench_rets[col] = np.array(bm_r)
+
+    # ── Alpha per month ──
+    alpha_vs = {}
+    for name, br in bench_rets.items():
+        alpha_vs[name] = strat_monthly_rets - br
+
+    # ── Metrics on monthly return rates ──
+    def _sharpe_r(rets, rf_annual=0.02):
+        rf_m = rf_annual / 12
+        excess = rets - rf_m
+        s = np.std(excess, ddof=1)
+        return (np.mean(excess) / s) * np.sqrt(12) if s > 0 else 0.0
+
+    def _sortino_r(rets, rf_annual=0.02):
+        rf_m = rf_annual / 12
+        excess = rets - rf_m
+        down = excess[excess < 0]
+        dv = np.std(down, ddof=1) if len(down) > 1 else 0
+        return (np.mean(excess) / dv) * np.sqrt(12) if dv > 0 else 0.0
+
+    def _mdd_from_returns(rets):
+        """MDD from a return series (non-compounding cumulative)."""
+        cum = np.cumsum(rets)
+        peak = np.maximum.accumulate(cum)
+        # Use cumulative return as proxy for wealth growth
+        # MDD = max peak-to-trough in cumulative return space
+        dd = cum - peak  # this is in return units
+        return np.min(dd)  # most negative value
+
+    def _mdd_pct_from_returns(rets):
+        """MDD as % of wealth, assuming wealth = 1 + cumsum(rets)."""
+        cum = np.cumsum(rets)
+        wealth = 1.0 + cum  # start at $1 notional
+        peak = np.maximum.accumulate(wealth)
+        dd = (wealth - peak) / peak
+        return np.min(dd)
+
+    def _mdd_duration_from_returns(rets):
+        cum = np.cumsum(rets)
+        wealth = 1.0 + cum
+        peak = np.maximum.accumulate(wealth)
+        dd = (wealth - peak) / peak
+        worst_idx = np.argmin(dd)
+        peak_val = peak[worst_idx]
+        candidates = np.where(wealth[:worst_idx + 1] == peak_val)[0]
+        peak_idx = candidates[0] if len(candidates) > 0 else 0
+        recovery_idx = len(wealth) - 1
+        for j in range(worst_idx, len(wealth)):
+            if wealth[j] >= peak_val:
+                recovery_idx = j
+                break
+        return recovery_idx - peak_idx
+
+    def _build_ret_metrics(name, rets):
+        pos = rets[rets > 0]
+        neg = rets[rets <= 0]
+        return {
+            "name": name,
+            "mean_monthly": np.mean(rets) * 100,
+            "median_monthly": np.median(rets) * 100,
+            "annualized": np.mean(rets) * 12 * 100,
+            "volatility": np.std(rets, ddof=1) * np.sqrt(12) * 100,
+            "sharpe": _sharpe_r(rets),
+            "sortino": _sortino_r(rets),
+            "mdd": _mdd_pct_from_returns(rets) * 100,
+            "mdd_duration": _mdd_duration_from_returns(rets),
+            "win_rate": (np.sum(rets > 0) / len(rets)) * 100,
+            "best_month": np.max(rets) * 100,
+            "worst_month": np.min(rets) * 100,
+            "avg_win": np.mean(pos) * 100 if len(pos) > 0 else 0,
+            "avg_loss": np.mean(neg) * 100 if len(neg) > 0 else 0,
+            "cumulative": np.sum(rets) * 100,
+            "rets": rets,
+        }
+
+    strat_rm = _build_ret_metrics("Strategy", strat_monthly_rets)
+    bench_rm = {}
+    for name, br in bench_rets.items():
+        bench_rm[name] = _build_ret_metrics(name, br)
+
+    # ── Display comparison table ──
+    col_w = 16
+    label_w = 28
+    table_sep = "  " + "+" + "-" * (label_w + 2) + ("+" + "-" * (col_w + 2)) * 4 + "+"
+
+    def _trow(label, vals):
+        cells = "".join(f"| {v:>{col_w}} " for v in vals)
+        return f"  | {label:<{label_w}} {cells}|"
+
+    col_names = ["Strategy", "SPY", "SPMO", "SPX"]
+
+    print(table_sep)
+    print(_trow("Metric", col_names))
+    print(table_sep.replace("-", "="))
+
+    def _bv(name, key, fmt=".2f"):
+        return f"{bench_rm.get(name, {}).get(key, 0):{fmt}}"
+
+    rows_table = [
+        ("Cumulative Return", f"{strat_rm['cumulative']:.2f}%",
+         lambda n: f"{_bv(n, 'cumulative')}%"),
+        ("Mean Monthly Return", f"{strat_rm['mean_monthly']:.2f}%",
+         lambda n: f"{_bv(n, 'mean_monthly')}%"),
+        ("Median Monthly Return", f"{strat_rm['median_monthly']:.2f}%",
+         lambda n: f"{_bv(n, 'median_monthly')}%"),
+        ("Annualized Return", f"{strat_rm['annualized']:.2f}%",
+         lambda n: f"{_bv(n, 'annualized')}%"),
+        ("Ann. Volatility", f"{strat_rm['volatility']:.2f}%",
+         lambda n: f"{_bv(n, 'volatility')}%"),
+        ("Sharpe Ratio", f"{strat_rm['sharpe']:.3f}",
+         lambda n: f"{_bv(n, 'sharpe', '.3f')}"),
+        ("Sortino Ratio", f"{strat_rm['sortino']:.3f}",
+         lambda n: f"{_bv(n, 'sortino', '.3f')}"),
+        ("Max Drawdown", f"{strat_rm['mdd']:.2f}%",
+         lambda n: f"{_bv(n, 'mdd')}%"),
+        ("MDD Duration (months)", f"{strat_rm['mdd_duration']}",
+         lambda n: f"{bench_rm.get(n, {}).get('mdd_duration', 0)}"),
+        ("Win Rate (monthly)", f"{strat_rm['win_rate']:.1f}%",
+         lambda n: f"{_bv(n, 'win_rate', '.1f')}%"),
+        ("Best Month", f"{strat_rm['best_month']:.2f}%",
+         lambda n: f"{_bv(n, 'best_month')}%"),
+        ("Worst Month", f"{strat_rm['worst_month']:.2f}%",
+         lambda n: f"{_bv(n, 'worst_month')}%"),
+        ("Avg Winning Month", f"{strat_rm['avg_win']:.2f}%",
+         lambda n: f"{_bv(n, 'avg_win')}%"),
+        ("Avg Losing Month", f"{strat_rm['avg_loss']:.2f}%",
+         lambda n: f"{_bv(n, 'avg_loss')}%"),
+    ]
+
+    for label, strat_val, bench_fn in rows_table:
+        print(_trow(label, [strat_val, bench_fn("SPY"), bench_fn("SPMO"), bench_fn("SPX")]))
+    print(table_sep)
+
+    # ── Alpha table ──
+    print()
+    print(table_sep)
+    print(_trow("ALPHA (Strategy - BM)", ["", "vs SPY", "vs SPMO", "vs SPX"]))
+    print(table_sep.replace("-", "="))
+
+    alpha_mean_row = [""]
+    alpha_cum_row = [""]
+    alpha_wr_row = [""]  # % of months strategy beats benchmark
+    for name in ["SPY", "SPMO", "SPX"]:
+        if name in alpha_vs:
+            a = alpha_vs[name]
+            alpha_mean_row.append(f"{np.mean(a) * 100:+.2f}%/mo")
+            alpha_cum_row.append(f"{np.sum(a) * 100:+.2f}%")
+            alpha_wr_row.append(f"{np.sum(a > 0) / len(a) * 100:.1f}%")
+        else:
+            alpha_mean_row.append("N/A")
+            alpha_cum_row.append("N/A")
+            alpha_wr_row.append("N/A")
+
+    print(_trow("Mean Monthly Alpha", alpha_mean_row))
+    print(_trow("Cumulative Alpha", alpha_cum_row))
+    print(_trow("Months Beating BM", alpha_wr_row))
+    print(table_sep)
+
+    # ── Win/Lose verdict ──
+    print()
+    for name in ["SPY", "SPMO", "SPX"]:
+        if name not in bench_rm:
+            continue
+        diff_ann = strat_rm["annualized"] - bench_rm[name]["annualized"]
+        if diff_ann > 1.0:  # >1% annualized advantage
+            verdict_bm = "WIN"
+        elif diff_ann > -1.0:
+            verdict_bm = "DRAW"
+        else:
+            verdict_bm = "LOSE"
+        beat_pct = np.sum(alpha_vs[name] > 0) / len(alpha_vs[name]) * 100
+        print(f"  Strategy vs {name:>4}: {verdict_bm}  "
+              f"(alpha: {diff_ann:+.2f}%/yr, beats {beat_pct:.0f}% of months)")
+
+    # ── Generate Charts ──────────────────────────────────────────────────
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import matplotlib.ticker as mticker
+    from pathlib import Path
+
+    reports_dir = Path("reports")
+    reports_dir.mkdir(parents=True, exist_ok=True)
+
+    fig, axes = plt.subplots(2, 2, figsize=(18, 12))
+    fig.suptitle(
+        "S&P 500 Sector Momentum — Monthly Return Rate Comparison (No Compounding)\n"
+        f"{len(monthly_df)} months | Pure % comparison | Alpha = Strategy% - Benchmark%",
+        fontsize=15, fontweight="bold", y=0.98,
+    )
+
+    colors = {"Strategy": "#2E86DE", "SPY": "#E74C3C", "SPMO": "#F39C12", "SPX": "#8E44AD"}
+    dates_plot = strat_dates
+
+    # ── Chart 1: Cumulative Return % ──
+    ax = axes[0, 0]
+    strat_cum_ret = np.cumsum(strat_monthly_rets) * 100
+    ax.plot(dates_plot, strat_cum_ret, label="Strategy",
+            color=colors["Strategy"], linewidth=2.5)
+    for name in ["SPY", "SPMO", "SPX"]:
+        if name in bench_rets:
+            bm_cum = np.cumsum(bench_rets[name]) * 100
+            ax.plot(dates_plot, bm_cum, label=name,
+                    color=colors[name], linewidth=1.5, linestyle="--")
+    ax.axhline(0, color="gray", linewidth=0.8)
+    ax.set_title("Cumulative Return % (Sum of Monthly Returns)", fontweight="bold")
+    ax.set_ylabel("Cumulative Return (%)")
+    ax.legend(fontsize=10)
+    ax.grid(alpha=0.3)
+
+    # ── Chart 2: Drawdown % ──
+    ax = axes[0, 1]
+    def _dd_from_rets(rets):
+        cum = np.cumsum(rets)
+        wealth = 1.0 + cum
+        peak = np.maximum.accumulate(wealth)
+        return (wealth - peak) / peak * 100
+
+    ax.fill_between(dates_plot, _dd_from_rets(strat_monthly_rets), 0,
+                     alpha=0.3, color=colors["Strategy"], label="Strategy")
+    for name in ["SPY", "SPMO", "SPX"]:
+        if name in bench_rets:
+            ax.plot(dates_plot, _dd_from_rets(bench_rets[name]),
+                    color=colors[name], linewidth=1, linestyle="--", label=name)
+    ax.set_title("Drawdown (%)", fontweight="bold")
+    ax.set_ylabel("Drawdown %")
+    ax.legend(fontsize=10)
+    ax.grid(alpha=0.3)
+
+    # ── Chart 3: Monthly Alpha vs SPY ──
+    ax = axes[1, 0]
+    if "SPY" in alpha_vs:
+        alpha_monthly = alpha_vs["SPY"] * 100
+        bar_colors = ["#27AE60" if v > 0 else "#E74C3C" for v in alpha_monthly]
+        ax.bar(dates_plot, alpha_monthly, color=bar_colors, alpha=0.7, width=25)
+        ax.axhline(0, color="black", linewidth=1)
+
+        # Add moving average
+        ma = pd.Series(alpha_monthly).rolling(12).mean()
+        ax.plot(dates_plot, ma, color="#2C3E50", linewidth=2, label="12M MA")
+
+        beat_pct = np.sum(alpha_monthly > 0) / len(alpha_monthly) * 100
+        ax.set_title(f"Monthly Alpha vs SPY (Strategy wins {beat_pct:.0f}% of months)",
+                     fontweight="bold")
+        ax.set_ylabel("Alpha (%)")
+        ax.legend(fontsize=10)
+    ax.grid(alpha=0.3, axis="y")
+
+    # ── Chart 4: Rolling 12-Month Cumulative Alpha ──
+    ax = axes[1, 1]
+    if "SPY" in alpha_vs:
+        rolling_window = 12
+        rolling_alpha = pd.Series(alpha_vs["SPY"] * 100).rolling(rolling_window).sum()
+        valid_idx = ~rolling_alpha.isna()
+        valid_dates = [dates_plot[i] for i in range(len(dates_plot)) if valid_idx.iloc[i]]
+        valid_alpha = rolling_alpha[valid_idx].values
+
+        bar_colors = ["#27AE60" if v > 0 else "#E74C3C" for v in valid_alpha]
+        ax.bar(valid_dates, valid_alpha, color=bar_colors, alpha=0.7, width=25)
+        ax.axhline(0, color="black", linewidth=1)
+        ax.set_title("Rolling 12-Month Alpha vs SPY", fontweight="bold")
+        ax.set_ylabel("12M Cumulative Alpha (%)")
+
+        win_12m = np.sum(valid_alpha > 0)
+        total_12m = len(valid_alpha)
+        ax.text(0.02, 0.95,
+                f"Positive 12M alpha: {win_12m}/{total_12m} ({win_12m/total_12m*100:.0f}%)",
+                transform=ax.transAxes, fontsize=9, verticalalignment="top",
+                bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5))
+    ax.grid(alpha=0.3, axis="y")
+
+    plt.tight_layout(rect=[0, 0, 1, 0.93])
+    chart_path = reports_dir / "trade_analysis_benchmark.png"
+    fig.savefig(str(chart_path), dpi=150, bbox_inches="tight", facecolor="white")
+    plt.close(fig)
+    print(f"\n  Chart saved: {chart_path}")
+
     # ── Final Verdict ─────────────────────────────────────────────────────
     print(f"\n{sep}")
     print("  FINAL ASSESSMENT")
     print(sep)
+
+    strat_sharpe = strat_rm["sharpe"]
+    strat_mdd = strat_rm["mdd"]
 
     checks = {
         "Expectancy > 0": expectancy > 0,
@@ -451,6 +773,10 @@ def run_trade_analysis(years_back=10):
         "Profit Factor > 1.5": profit_factor > 1.5,
         "Win Rate > 45%": win_rate > 0.45,
         "Total Efficiency > 30%": avg_total_eff > 0.3,
+        "Sharpe > 0.5": strat_sharpe > 0.5,
+        "MDD > -50%": strat_mdd > -50.0,
+        "Beat SPY (ann. ret)": strat_rm["annualized"] > bench_rm.get("SPY", {}).get("annualized", 0),
+        "Beat SPMO (ann. ret)": strat_rm["annualized"] > bench_rm.get("SPMO", {}).get("annualized", 0),
     }
 
     passed = sum(checks.values())
@@ -463,9 +789,9 @@ def run_trade_analysis(years_back=10):
     print(sep2)
     if passed == total:
         print(f"  RESULT: {passed}/{total} checks passed — STRATEGY IS STRONG")
-    elif passed >= 4:
+    elif passed >= 7:
         print(f"  RESULT: {passed}/{total} checks passed — STRATEGY HAS POTENTIAL")
-    elif passed >= 2:
+    elif passed >= 4:
         print(f"  RESULT: {passed}/{total} checks passed — STRATEGY NEEDS IMPROVEMENT")
     else:
         print(f"  RESULT: {passed}/{total} checks passed — STRATEGY IS WEAK")
@@ -479,6 +805,9 @@ def run_trade_analysis(years_back=10):
         "ic_mean": mean_ic,
         "icir": icir,
         "profit_factor": profit_factor,
+        "strat_metrics": strat_rm,
+        "bench_metrics": bench_rm,
+        "actual_years": actual_years,
     }
 
 

@@ -509,16 +509,29 @@ python scripts/trade_analysis.py --years 20
 - **Entry / Exit / Total Efficiency**：進出場時機品質
 - **MFE / MAE**：持有期間最大浮盈/浮虧
 
-20 年結果摘要（4/6 通過）：
+20 年結果摘要：
+
+**綜合評估（8/10 通過）：**
 
 | 指標 | 結果 | 判定 |
 |------|------|------|
 | Expectancy | $83.64/trade | PASS |
 | Profit Factor | 1.79 | PASS |
 | Win Rate | 56.7% | PASS |
-| IC | 0.0605 | PASS |
+| Sharpe Ratio | 1.063 | PASS |
+| Max Drawdown | -24.40% | PASS |
+| Beat SPY/SPMO | +18.80%/yr alpha | PASS |
 | ICIR | 0.1509 | FAIL |
 | Total Efficiency | 13.5% | FAIL |
+
+**Benchmark 比較（純月報酬率 %，無複利）：**
+
+| Metric | Strategy | SPY | SPMO | SPX |
+|--------|----------|-----|------|-----|
+| Annualized Return | 30.02% | 11.22% | 9.30% | 9.38% |
+| Sharpe Ratio | 1.063 | 0.604 | 0.615 | 0.483 |
+| Max Drawdown | -24.40% | -58.74% | -11.10% | -62.71% |
+| Monthly Alpha vs SPY | +1.57%/mo | — | — | — |
 
 詳細分析見 [完整報告](docs/trade_analysis_report.md)。
 
