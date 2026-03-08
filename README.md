@@ -493,7 +493,7 @@ python test_all.py
 已提供完整策略技術文件：
 
 - `docs/STRATEGY_PLAYBOOK.md` — 策略技術文件（資料來源、訊號設計、偏誤控制、風控）
-- [`reports/trade_analysis_report.md`](reports/trade_analysis_report.md) — **交易級策略分析報告（無複利）**
+- [`docs/trade_analysis_report.md`](docs/trade_analysis_report.md) — **交易級策略分析報告（無複利）**
 
 ### 14.1 Trade-Level Analysis（無複利分析）
 
@@ -520,7 +520,7 @@ python scripts/trade_analysis.py --years 20
 | ICIR | 0.1509 | FAIL |
 | Total Efficiency | 13.5% | FAIL |
 
-詳細分析見 [完整報告](reports/trade_analysis_report.md)。
+詳細分析見 [完整報告](docs/trade_analysis_report.md)。
 
 ---
 
