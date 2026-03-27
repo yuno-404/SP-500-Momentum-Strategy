@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>S&P 500 Momentum Strategy</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; background: #0f172a; min-height: 100vh; color: #e2e8f0; }
+
+        /* ── Tabs ──────────────────────────────────── */
+        .tab-bar { display: flex; background: #1e293b; border-bottom: 2px solid #334155; position: sticky; top: 0; z-index: 100; }
+        .tab-btn { flex: 1; padding: 16px; text-align: center; cursor: pointer; font-weight: 600; font-size: 15px; color: #94a3b8; border: none; background: none; transition: all .2s; }
+        .tab-btn:hover { color: #e2e8f0; background: #334155; }
+        .tab-btn.active { color: #38bdf8; border-bottom: 3px solid #38bdf8; background: #1e293b; }
+        .tab-content { display: none; padding: 24px; max-width: 1300px; margin: 0 auto; }
+        .tab-content.active { display: block; }
+
+        /* ── Common ────────────────────────────────── */
+        h2 { color: #f1f5f9; margin-bottom: 16px; font-size: 1.4em; }
+        .card { background: #1e293b; border-radius: 12px; padding: 24px; margin-bottom: 20px; border: 1px solid #334155; }
+        .btn { padding: 12px 28px; font-size: 15px; font-weight: 600; border: none; border-radius: 8px; cursor: pointer; transition: .2s; }
+        .btn-primary { background: #3b82f6; color: #fff; }
+        .btn-primary:hover { background: #2563eb; }
+        .btn-green { background: #10b981; color: #fff; }
+        .btn-green:hover { background: #059669; }
+        .btn-red { background: #ef4444; color: #fff; }
+        .btn-red:hover { background: #dc2626; }
+        .btn-yellow { background: #f59e0b; color: #000; }
+        .btn:disabled { opacity: .5; cursor: not-allowed; }
+        input, select { padding: 10px 14px; border-radius: 6px; border: 1px solid #475569; background: #0f172a; color: #e2e8f0; font-size: 15px; }
+        input:focus, select:focus { outline: none; border-color: #3b82f6; }
+        label { display: block; margin-bottom: 6px; font-weight: 500; color: #94a3b8; font-size: 13px; }
+        small { color: #64748b; }
+
+        /* ── Table ─────────────────────────────────── */
+        table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        th { background: #334155; color: #94a3b8; padding: 12px; text-align: left; font-weight: 600; text-transform: uppercase; font-size: 11px; letter-spacing: .5px; }
+        td { padding: 10px 12px; border-bottom: 1px solid #1e293b; }
+        tr:hover td { background: #1e293b; }
+        .pos { color: #34d399; } .neg { color: #f87171; }
+
+        /* ── Metrics grid ──────────────────────────── */
+        .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 24px; }
+        .metric { background: #0f172a; border-radius: 8px; padding: 16px; border-left: 3px solid #3b82f6; }
+        .metric .label { font-size: 11px; color: #64748b; text-transform: uppercase; letter-spacing: .5px; }
+        .metric .val { font-size: 1.8em; font-weight: 700; margin-top: 4px; }
+
+        /* ── Loading ───────────────────────────────── */
+        .spinner { border: 3px solid #334155; border-top: 3px solid #3b82f6; border-radius: 50%; width: 40px; height: 40px; animation: spin .8s linear infinite; margin: 20px auto; }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+        .loading-msg { text-align: center; padding: 30px; color: #64748b; }
+
+        /* ── Badges ────────────────────────────────── */
+        .badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+        .badge-sell { background: #7f1d1d; color: #fca5a5; }
+        .badge-buy { background: #064e3b; color: #6ee7b7; }
+        .badge-hold { background: #1e3a5f; color: #93c5fd; }
+
+        /* ── Summary bar ───────────────────────────── */
+        .summary-bar { display: flex; gap: 24px; padding: 16px 20px; background: #0f172a; border-radius: 8px; margin-bottom: 20px; flex-wrap: wrap; }
+        .summary-item { text-align: center; }
+        .summary-item .s-label { font-size: 11px; color: #64748b; }
+        .summary-item .s-val { font-size: 1.4em; font-weight: 700; }
+    </style>
+</head>
+<body>
+    <!-- ═══════════════ Tab Bar ═══════════════ -->
+    <div class="tab-bar">
+        <button class="tab-btn active" onclick="switchTab('portfolio')">Live Portfolio</button>
+        <button class="tab-btn" onclick="switchTab('rebalance')">Rebalance</button>
+        <button class="tab-btn" onclick="switchTab('history')">Trade History</button>
+        <button class="tab-btn" onclick="switchTab('backtest')">Backtest</button>
+    </div>
+
+    <!-- ═══════════════ TAB 1: Live Portfolio ═══════════════ -->
+    <div id="tab-portfolio" class="tab-content active">
+        <h2>Current Holdings</h2>
+
+        <div class="card" id="portfolio-empty" style="text-align:center; padding:60px;">
+            <p style="font-size:18px; margin-bottom:20px;">No holdings yet. Generate signals and confirm your first buy.</p>
+            <div style="display:flex; gap:12px; justify-content:center; align-items:end; flex-wrap:wrap;">
+                <div><label for="initCapital">Capital ($)</label><input type="number" id="initCapital" value="30000" min="1000" style="width:140px;"></div>
+                <button class="btn btn-primary" onclick="generateAndBuy()">Generate Buy Signals</button>
+            </div>
+        </div>
+
+        <div id="portfolio-active" style="display:none;">
+            <div class="summary-bar" id="portfolio-summary"></div>
+            <div class="card" style="overflow-x:auto;">
+                <table><thead><tr>
+                    <th>Ticker</th><th>Sector</th><th>Shares</th><th>Buy Price</th><th>Current</th><th>Cost</th><th>Market Value</th><th>P&L</th><th>P&L %</th>
+                </tr></thead><tbody id="holdings-body"></tbody></table>
+            </div>
+        </div>
+
+        <!-- First-buy confirmation dialog -->
+        <div id="buy-confirm-dialog" style="display:none;" class="card">
+            <h2>Confirm Buy Orders</h2>
+            <p style="margin-bottom:16px; color:#94a3b8;">Review and confirm. These will be recorded as your starting portfolio.</p>
+            <div style="overflow-x:auto;"><table><thead><tr>
+                <th>Ticker</th><th>Sector</th><th>Weight</th><th>Price</th><th>Shares</th><th>Cost</th>
+            </tr></thead><tbody id="buy-confirm-body"></tbody></table></div>
+            <div style="margin-top:16px; display:flex; gap:12px;">
+                <button class="btn btn-green" onclick="executeBuy()">Confirm Buy</button>
+                <button class="btn btn-red" onclick="cancelBuy()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════════════ TAB 2: Rebalance ═══════════════ -->
+    <div id="tab-rebalance" class="tab-content">
+        <h2>Monthly Rebalance</h2>
+        <div class="card">
+            <p style="margin-bottom:16px; color:#94a3b8;">Compare your current holdings against this month's momentum signals.</p>
+            <button class="btn btn-primary" onclick="loadRebalance()" id="rebalBtn">Calculate Rebalance</button>
+        </div>
+        <div id="rebalance-loading" class="loading-msg" style="display:none;"><div class="spinner"></div><p>Calculating signals...</p></div>
+        <div id="rebalance-result" style="display:none;">
+            <div class="summary-bar" id="rebal-summary"></div>
+
+            <!-- SELL section -->
+            <div class="card" id="rebal-sells-card" style="display:none;">
+                <h2 style="color:#f87171;">SELL</h2>
+                <table><thead><tr><th>Ticker</th><th>Sector</th><th>Shares</th><th>Buy Price</th><th>Sell Price</th><th>P&L</th><th>P&L %</th></tr></thead>
+                <tbody id="rebal-sells"></tbody></table>
+            </div>
+
+            <!-- HOLD section -->
+            <div class="card" id="rebal-holds-card" style="display:none;">
+                <h2 style="color:#38bdf8;">HOLD</h2>
+                <table><thead><tr><th>Ticker</th><th>Sector</th><th>Shares</th><th>Buy Price</th><th>Current</th><th>P&L</th><th>P&L %</th></tr></thead>
+                <tbody id="rebal-holds"></tbody></table>
+            </div>
+
+            <!-- BUY section -->
+            <div class="card" id="rebal-buys-card" style="display:none;">
+                <h2 style="color:#34d399;">BUY</h2>
+                <table><thead><tr><th>Ticker</th><th>Sector</th><th>Momentum</th><th>Price</th><th>Shares</th><th>Cost</th></tr></thead>
+                <tbody id="rebal-buys"></tbody></table>
+            </div>
+
+            <button class="btn btn-green" onclick="executeRebalance()" id="execRebalBtn" style="margin-top:12px;">Confirm Rebalance</button>
+        </div>
+    </div>
+
+    <!-- ═══════════════ TAB 3: Trade History ═══════════════ -->
+    <div id="tab-history" class="tab-content">
+        <h2>Trade History</h2>
+        <div class="card" style="overflow-x:auto;">
+            <table><thead><tr>
+                <th>Date</th><th>Action</th><th>Ticker</th><th>Sector</th><th>Shares</th><th>Price</th><th>Value</th><th>P&L</th><th>P&L %</th>
+            </tr></thead><tbody id="history-body"></tbody></table>
+        </div>
+        <div style="margin-top:12px;">
+            <button class="btn btn-red" onclick="resetPortfolio()">Reset All Records</button>
+        </div>
+    </div>
+
+    <!-- ═══════════════ TAB 4: Backtest (original) ═══════════════ -->
+    <div id="tab-backtest" class="tab-content">
+        <h2>Backtest Engine</h2>
+        <div class="card">
+            <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px; margin-bottom:16px;">
+                <div><label for="years">Period (Years)</label><input type="number" id="years" min="1" max="20" value="10" style="width:100%;"></div>
+                <div><label for="topn">Stocks / Sector</label>
+                    <select id="topn" style="width:100%;"><option value="1" selected>1</option><option value="2">2</option><option value="3">3</option><option value="5">5</option></select>
+                </div>
+                <div style="display:flex; align-items:end;">
+                    <button class="btn btn-primary" onclick="runBacktest()" id="runBtn" style="width:100%;">Run Backtest</button>
+                </div>
+            </div>
+        </div>
+        <div id="bt-loading" class="loading-msg" style="display:none;"><div class="spinner"></div><p>Running backtest...</p></div>
+        <div id="bt-error" class="card" style="display:none; border-left:3px solid #ef4444;"></div>
+        <div id="bt-results" style="display:none;">
+            <div class="metrics-grid" id="bt-metrics"></div>
+            <div class="card" style="overflow-x:auto;">
+                <h2>Current Portfolio</h2>
+                <table><thead><tr><th>Ticker</th><th>Sector</th><th>Weight</th><th>Momentum</th></tr></thead>
+                <tbody id="bt-portfolio"></tbody></table>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════════════ SCRIPT ═══════════════ -->
+    <script>
+    const API = 'http://localhost:5000';
+    let pendingOrders = null;
+    let rebalanceData = null;
+
+    // ── Tab switching ───────────────────────────
+    function switchTab(name) {
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+        const btn = document.querySelector(`.tab-btn[onclick="switchTab('${name}')"]`);
+        if (btn) btn.classList.add('active');
+        document.getElementById('tab-' + name).classList.add('active');
+
+        if (name === 'portfolio') loadHoldings();
+        if (name === 'history') loadHistory();
+    }
+
+    // ── TAB 1: Portfolio ────────────────────────
+    async function loadHoldings() {
+        try {
+            const r = await fetch(API + '/api/portfolio/holdings');
+            const d = await r.json();
+            if (d.status === 'empty' || !d.holdings || d.holdings.length === 0) {
+                document.getElementById('portfolio-empty').style.display = 'block';
+                document.getElementById('portfolio-active').style.display = 'none';
+                return;
+            }
+            document.getElementById('portfolio-empty').style.display = 'none';
+            document.getElementById('portfolio-active').style.display = 'block';
+
+            const s = d.summary;
+            document.getElementById('portfolio-summary').innerHTML = `
+                <div class="summary-item"><div class="s-label">Total Cost</div><div class="s-val">$${s.total_cost.toLocaleString()}</div></div>
+                <div class="summary-item"><div class="s-label">Market Value</div><div class="s-val">$${s.total_market.toLocaleString()}</div></div>
+                <div class="summary-item"><div class="s-label">Cash</div><div class="s-val">$${d.cash.toLocaleString()}</div></div>
+                <div class="summary-item"><div class="s-label">Total Value</div><div class="s-val" style="color:#38bdf8;">$${s.total_value.toLocaleString()}</div></div>
+                <div class="summary-item"><div class="s-label">Total P&L</div><div class="s-val ${s.total_pnl >= 0 ? 'pos' : 'neg'}">$${s.total_pnl.toLocaleString()} (${s.total_pnl_pct}%)</div></div>
+            `;
+
+            document.getElementById('holdings-body').innerHTML = d.holdings.map(h => `<tr>
+                <td><strong>${h.ticker}</strong></td><td>${h.sector}</td><td>${h.shares}</td>
+                <td>$${h.buy_price.toFixed(2)}</td><td>${h.price_now ? '$' + h.price_now.toFixed(2) : 'N/A'}</td>
+                <td>$${h.cost_basis.toFixed(2)}</td><td>$${h.market_value.toFixed(2)}</td>
+                <td class="${h.pnl >= 0 ? 'pos' : 'neg'}">$${h.pnl.toFixed(2)}</td>
+                <td class="${h.pnl_pct >= 0 ? 'pos' : 'neg'}">${h.pnl_pct >= 0 ? '+' : ''}${h.pnl_pct}%</td>
+            </tr>`).join('');
+        } catch (e) { console.error(e); }
+    }
+
+    async function generateAndBuy() {
+        const capital = parseFloat(document.getElementById('initCapital').value);
+        if (!capital || capital < 1000) { alert('Please enter capital >= $1,000'); return; }
+
+        document.getElementById('portfolio-empty').innerHTML = '<div class="spinner"></div><p>Generating signals...</p>';
+
+        try {
+            const r = await fetch(API + '/api/portfolio/signals');
+            const d = await r.json();
+            if (d.status !== 'ok') throw new Error(d.error);
+
+            pendingOrders = d.signals.map(s => {
+                const alloc = capital * s.weight;
+                const shares = s.price ? Math.floor(alloc / s.price) : 0;
+                return { ...s, shares, cost: shares * (s.price || 0) };
+            }).filter(o => o.shares > 0);
+
+            const totalCost = pendingOrders.reduce((a, o) => a + o.cost, 0);
+
+            document.getElementById('buy-confirm-body').innerHTML = pendingOrders.map(o => `<tr>
+                <td><strong>${o.ticker}</strong></td><td>${o.sector}</td><td>${(o.weight * 100).toFixed(2)}%</td>
+                <td>$${o.price.toFixed(2)}</td><td style="font-weight:700; color:#34d399;">${o.shares}</td>
+                <td>$${o.cost.toFixed(2)}</td>
+            </tr>`).join('') + `<tr style="background:#0f172a; font-weight:700;">
+                <td colspan="5" style="text-align:right;">Total / Cash Remaining:</td>
+                <td>$${totalCost.toFixed(2)} / $${(capital - totalCost).toFixed(2)}</td>
+            </tr>`;
+
+            document.getElementById('portfolio-empty').style.display = 'none';
+            document.getElementById('buy-confirm-dialog').style.display = 'block';
+            document.getElementById('buy-confirm-dialog').dataset.capital = capital;
+        } catch (e) {
+            alert('Error: ' + e.message);
+            location.reload();
+        }
+    }
+
+    async function executeBuy() {
+        const capital = parseFloat(document.getElementById('buy-confirm-dialog').dataset.capital);
+        try {
+            const r = await fetch(API + '/api/portfolio/buy', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ capital, orders: pendingOrders.map(o => ({
+                    ticker: o.ticker, sector: o.sector, shares: o.shares, price: o.price, weight: o.weight
+                }))})
+            });
+            const d = await r.json();
+            if (d.status !== 'ok') throw new Error(d.error);
+            alert(d.message);
+            document.getElementById('buy-confirm-dialog').style.display = 'none';
+            loadHoldings();
+        } catch (e) { alert('Error: ' + e.message); }
+    }
+
+    function cancelBuy() {
+        document.getElementById('buy-confirm-dialog').style.display = 'none';
+        document.getElementById('portfolio-empty').style.display = 'block';
+        document.getElementById('portfolio-empty').innerHTML = `
+            <p style="font-size:18px; margin-bottom:20px;">No holdings yet. Generate signals and confirm your first buy.</p>
+            <div style="display:flex; gap:12px; justify-content:center; align-items:end; flex-wrap:wrap;">
+                <div><label for="initCapital">Capital ($)</label><input type="number" id="initCapital" value="30000" min="1000" style="width:140px;"></div>
+                <button class="btn btn-primary" onclick="generateAndBuy()">Generate Buy Signals</button>
+            </div>`;
+    }
+
+    // ── TAB 2: Rebalance ────────────────────────
+    async function loadRebalance() {
+        document.getElementById('rebalBtn').disabled = true;
+        document.getElementById('rebalance-loading').style.display = 'block';
+        document.getElementById('rebalance-result').style.display = 'none';
+
+        try {
+            const r = await fetch(API + '/api/portfolio/rebalance');
+            const d = await r.json();
+            if (d.status !== 'ok') throw new Error(d.error);
+            rebalanceData = d;
+
+            // Summary
+            const totalSellPnl = d.sells.reduce((a, s) => a + s.pnl, 0);
+            const skippedNoPrice = (d.skipped_no_price || []).length;
+            const skippedBudget = (d.skipped_insufficient_budget || []).length;
+            document.getElementById('rebal-summary').innerHTML = `
+                <div class="summary-item"><div class="s-label">Portfolio Value</div><div class="s-val">$${d.portfolio_value.toLocaleString()}</div></div>
+                <div class="summary-item"><div class="s-label">Available Cash</div><div class="s-val">$${d.available_cash.toLocaleString()}</div></div>
+                <div class="summary-item"><div class="s-label">Sells</div><div class="s-val" style="color:#f87171;">${d.sells.length}</div></div>
+                <div class="summary-item"><div class="s-label">Buys</div><div class="s-val" style="color:#34d399;">${d.buys.length}</div></div>
+                <div class="summary-item"><div class="s-label">Holds</div><div class="s-val" style="color:#38bdf8;">${d.holds.length}</div></div>
+                <div class="summary-item"><div class="s-label">Realized P&L (sells)</div><div class="s-val ${totalSellPnl >= 0 ? 'pos' : 'neg'}">$${totalSellPnl.toFixed(2)}</div></div>
+                <div class="summary-item"><div class="s-label">Skipped (No Price)</div><div class="s-val">${skippedNoPrice}</div></div>
+                <div class="summary-item"><div class="s-label">Skipped (Budget)</div><div class="s-val">${skippedBudget}</div></div>
+            `;
+
+            // Sells
+            if (d.sells.length > 0) {
+                document.getElementById('rebal-sells-card').style.display = 'block';
+                document.getElementById('rebal-sells').innerHTML = d.sells.map(s => `<tr>
+                    <td><strong>${s.ticker}</strong> <span class="badge badge-sell">SELL</span></td><td>${s.sector}</td><td>${s.shares}</td>
+                    <td>$${s.buy_price.toFixed(2)}</td><td>${s.price_now ? '$' + s.price_now.toFixed(2) : 'N/A'}</td>
+                    <td class="${s.pnl >= 0 ? 'pos' : 'neg'}">$${s.pnl.toFixed(2)}</td>
+                    <td class="${s.pnl_pct >= 0 ? 'pos' : 'neg'}">${s.pnl_pct >= 0 ? '+' : ''}${s.pnl_pct}%</td>
+                </tr>`).join('');
+            } else { document.getElementById('rebal-sells-card').style.display = 'none'; }
+
+            // Holds
+            if (d.holds.length > 0) {
+                document.getElementById('rebal-holds-card').style.display = 'block';
+                document.getElementById('rebal-holds').innerHTML = d.holds.map(h => `<tr>
+                    <td><strong>${h.ticker}</strong> <span class="badge badge-hold">HOLD</span></td><td>${h.sector}</td><td>${h.shares}</td>
+                    <td>$${h.buy_price.toFixed(2)}</td><td>${h.price_now ? '$' + h.price_now.toFixed(2) : 'N/A'}</td>
+                    <td class="${h.pnl >= 0 ? 'pos' : 'neg'}">$${h.pnl.toFixed(2)}</td>
+                    <td class="${h.pnl_pct >= 0 ? 'pos' : 'neg'}">${h.pnl_pct >= 0 ? '+' : ''}${h.pnl_pct}%</td>
+                </tr>`).join('');
+            } else { document.getElementById('rebal-holds-card').style.display = 'none'; }
+
+            // Buys
+            if (d.buys.length > 0) {
+                document.getElementById('rebal-buys-card').style.display = 'block';
+                document.getElementById('rebal-buys').innerHTML = d.buys.map(b => `<tr>
+                    <td><strong>${b.ticker}</strong> <span class="badge badge-buy">BUY</span></td><td>${b.sector}</td>
+                    <td>${b.momentum}%</td><td>${b.price_now ? '$' + b.price_now.toFixed(2) : 'N/A'}</td>
+                    <td style="font-weight:700; color:#34d399;">${b.shares}</td><td>$${b.cost.toFixed(2)}</td>
+                </tr>`).join('');
+            } else { document.getElementById('rebal-buys-card').style.display = 'none'; }
+
+            document.getElementById('rebalance-result').style.display = 'block';
+            document.getElementById('execRebalBtn').style.display = (d.sells.length > 0 || d.buys.length > 0) ? 'inline-block' : 'none';
+        } catch (e) { alert('Error: ' + e.message); }
+        finally {
+            document.getElementById('rebalance-loading').style.display = 'none';
+            document.getElementById('rebalBtn').disabled = false;
+        }
+    }
+
+    async function executeRebalance() {
+        if (!rebalanceData) return;
+        if (!confirm('Confirm rebalance? This will record sells and buys.')) return;
+
+        try {
+            const body = {
+                sells: rebalanceData.sells.map(s => ({ ticker: s.ticker, shares: s.shares, price: s.price_now })),
+                buys: rebalanceData.buys.map(b => ({ ticker: b.ticker, sector: b.sector, shares: b.shares, price: b.price_now, weight: b.weight })),
+            };
+            const r = await fetch(API + '/api/portfolio/confirm-rebalance', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+            });
+            const d = await r.json();
+            if (d.status !== 'ok') throw new Error(d.error);
+            alert(d.message);
+            switchTab('portfolio');
+            loadHoldings();
+        } catch (e) { alert('Error: ' + e.message); }
+    }
+
+    // ── TAB 3: History ──────────────────────────
+    async function loadHistory() {
+        try {
+            const r = await fetch(API + '/api/portfolio/history');
+            const d = await r.json();
+            if (!d.history || d.history.length === 0) {
+                document.getElementById('history-body').innerHTML = '<tr><td colspan="9" style="text-align:center; padding:40px; color:#64748b;">No trades yet.</td></tr>';
+                return;
+            }
+            // Show newest first
+            const rows = [...d.history].reverse();
+            document.getElementById('history-body').innerHTML = rows.map(h => {
+                const isBuy = h.action === 'BUY';
+                return `<tr>
+                    <td>${h.date}</td>
+                    <td><span class="badge ${isBuy ? 'badge-buy' : 'badge-sell'}">${h.action}</span></td>
+                    <td><strong>${h.ticker}</strong></td><td>${h.sector}</td><td>${h.shares}</td>
+                    <td>$${h.price.toFixed(2)}</td><td>$${h.value.toFixed(2)}</td>
+                    <td class="${h.pnl >= 0 ? 'pos' : 'neg'}">${isBuy ? '-' : '$' + h.pnl.toFixed(2)}</td>
+                    <td class="${h.pnl_pct >= 0 ? 'pos' : 'neg'}">${isBuy ? '-' : (h.pnl_pct >= 0 ? '+' : '') + h.pnl_pct + '%'}</td>
+                </tr>`;
+            }).join('');
+        } catch (e) { console.error(e); }
+    }
+
+    async function resetPortfolio() {
+        if (!confirm('Delete ALL records? This cannot be undone.')) return;
+        if (!confirm('Are you sure? This will erase your entire trade history.')) return;
+        await fetch(API + '/api/portfolio/reset', { method: 'POST' });
+        alert('Portfolio reset.');
+        loadHoldings();
+        loadHistory();
+    }
+
+    // ── TAB 4: Backtest ─────────────────────────
+    async function runBacktest() {
+        const btn = document.getElementById('runBtn');
+        btn.disabled = true;
+        document.getElementById('bt-loading').style.display = 'block';
+        document.getElementById('bt-results').style.display = 'none';
+        document.getElementById('bt-error').style.display = 'none';
+
+        try {
+            const r = await fetch(API + '/api/backtest', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    years_back: parseInt(document.getElementById('years').value),
+                    top_n: parseInt(document.getElementById('topn').value),
+                })
+            });
+            const d = await r.json();
+            if (d.status === 'error') throw new Error(d.error);
+            const m = d.metrics;
+
+            const fmt = (v, pct) => v == null ? 'N/A' : pct ? (v * 100).toFixed(2) + '%' : v.toFixed(3);
+            const items = [
+                ['Strategy Return', fmt(m.total_return, true), m.total_return >= 0],
+                ['SPY Return', fmt(m.spy_return, true), m.spy_return >= 0],
+                ['SPMO Return', fmt(m.spmo_return, true), m.spmo_return >= 0],
+                ['Annualized', fmt(m.annualized_return, true), m.annualized_return >= 0],
+                ['Sharpe', fmt(m.sharpe_ratio, false), m.sharpe_ratio >= 0],
+                ['Sortino', fmt(m.sortino_ratio, false), m.sortino_ratio >= 0],
+                ['Max Drawdown', fmt(m.max_drawdown, true), false],
+                ['Win Rate', fmt(m.win_rate, true), true],
+                ['Trades', m.total_trades, true],
+            ];
+            document.getElementById('bt-metrics').innerHTML = items.map(([label, val, good]) =>
+                `<div class="metric"><div class="label">${label}</div><div class="val ${good ? 'pos' : 'neg'}">${val}</div></div>`
+            ).join('');
+
+            document.getElementById('bt-portfolio').innerHTML = d.portfolio.map(s => `<tr>
+                <td><strong>${s.Ticker}</strong></td><td>${s.Sector}</td><td>${s.Weight}</td><td>${s.Momentum}</td>
+            </tr>`).join('');
+
+            document.getElementById('bt-results').style.display = 'block';
+        } catch (e) {
+            document.getElementById('bt-error').textContent = 'Error: ' + e.message;
+            document.getElementById('bt-error').style.display = 'block';
+        } finally {
+            document.getElementById('bt-loading').style.display = 'none';
+            btn.disabled = false;
+        }
+    }
+
+    // ── Init ────────────────────────────────────
+    loadHoldings();
+    </script>
+</body>
+</html>
