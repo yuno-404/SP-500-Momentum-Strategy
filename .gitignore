@@ -38,7 +38,7 @@ htmlcov/
 Thumbs.db
 .idea/
 .vscode/
-.claude/
+/.claude/
 
 # Project runtime artifacts
 cache/
